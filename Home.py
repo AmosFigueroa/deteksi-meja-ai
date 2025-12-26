@@ -1,4 +1,7 @@
 import streamlit as st
+import sys
+st.divider()
+st.caption(f"Versi Python Server: {sys.version}")
 
 st.set_page_config(
     page_title="Sistem Resto AI",
