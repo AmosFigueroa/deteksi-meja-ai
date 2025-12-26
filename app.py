@@ -1,16 +1,15 @@
 import streamlit as st
 import cv2
+import av
 import numpy as np
 from ultralytics import YOLO
-from PIL import Image
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
-# --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Deteksi Meja AI", layout="wide")
+# --- 1. KONFIGURASI HALAMAN ---
+st.set_page_config(page_title="Realtime CCTV AI", layout="wide")
+st.title("📹 Deteksi Meja Real-time")
 
-st.title("🕵️ Deteksi Ketersediaan Meja (Web Version)")
-st.write("Arahkan kamera ke kursi/meja, atur kotak area, lalu lihat hasilnya!")
-
-# --- 1. LOAD MODEL AI ---
+# --- 2. LOAD MODEL AI ---
 @st.cache_resource
 def load_model():
     return YOLO("yolov8n.pt")
@@ -18,79 +17,74 @@ def load_model():
 try:
     model = load_model()
 except Exception as e:
-    st.error(f"Gagal memuat model: {e}")
+    st.error(f"Error loading model: {e}")
 
-# --- 2. SIDEBAR: PENGATURAN MEJA ---
-st.sidebar.header("🛠️ Setting Area Meja")
-st.sidebar.info("Geser slider di bawah ini untuk pasang kotak hijau di kursimu.")
+# --- 3. CLASS PEMROSES VIDEO ---
+# Class ini bertugas menerima frame video satu per satu dan memprosesnya
+class VideoProcessor(VideoTransformerBase):
+    def __init__(self):
+        # Default setting meja (akan diupdate dari slider)
+        self.meja_coords = (100, 200, 300, 400) # x1, y1, x2, y2
+        self.model = model
 
-# Menggunakan Slider sebagai pengganti mouse click
-# Kita asumsikan resolusi kamera default web adalah 640x480
-x_pos = st.sidebar.slider("Posisi Kiri-Kanan (X)", 0, 640, 150)
-y_pos = st.sidebar.slider("Posisi Atas-Bawah (Y)", 0, 480, 200)
-lebar = st.sidebar.slider("Lebar Kotak", 50, 400, 200)
-tinggi = st.sidebar.slider("Tinggi Kotak", 50, 400, 200)
+    def recv(self, frame):
+        # 1. Konversi frame dari format Web ke OpenCV
+        img = frame.to_ndarray(format="bgr24")
+        
+        # 2. Deteksi Orang dengan YOLO
+        results = self.model.predict(img, classes=0, conf=0.5, verbose=False)
+        
+        orang_terdeteksi = []
+        for result in results:
+            boxes = result.boxes
+            for box in boxes:
+                bx1, by1, bx2, by2 = map(int, box.xyxy[0])
+                cx, cy = (bx1 + bx2) // 2, by2  # Titik kaki
+                orang_terdeteksi.append((cx, cy))
+                
+                # Gambar kotak ungu di orang
+                cv2.rectangle(img, (bx1, by1), (bx2, by2), (255, 0, 255), 2)
 
-# Koordinat Meja [x1, y1, x2, y2]
-meja_x1, meja_y1 = x_pos, y_pos
-meja_x2, meja_y2 = x_pos + lebar, y_pos + tinggi
+        # 3. Logika Status Meja
+        mx1, my1, mx2, my2 = self.meja_coords
+        status = "KOSONG"
+        warna_kotak = (0, 255, 0) # Hijau
 
-# --- 3. INPUT KAMERA ---
-img_file = st.camera_input("Ambil Foto untuk Deteksi")
+        for orang in orang_terdeteksi:
+            ox, oy = orang
+            # Cek apakah kaki orang ada di dalam kotak meja
+            if mx1 < ox < mx2 and my1 < oy < my2:
+                status = "TERISI"
+                warna_kotak = (0, 0, 255) # Merah
+                break
+        
+        # 4. Gambar Kotak Meja & Status
+        cv2.rectangle(img, (mx1, my1), (mx2, my2), warna_kotak, 3)
+        cv2.putText(img, f"Status: {status}", (mx1, my1 - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, warna_kotak, 2)
 
-if img_file is not None:
-    # Konversi gambar dari Browser ke format OpenCV
-    file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
-    frame = cv2.imdecode(file_bytes, 1)
-    
-    # --- 4. PROSES AI ---
-    # Deteksi orang (class=0)
-    results = model.predict(frame, classes=0, conf=0.4)
-    
-    orang_terdeteksi = []
-    
-    # Ambil data hasil deteksi
-    for result in results:
-        boxes = result.boxes
-        for box in boxes:
-            bx1, by1, bx2, by2 = map(int, box.xyxy[0])
-            
-            # Titik tengah kaki (agar akurat saat duduk)
-            cx = (bx1 + bx2) // 2
-            cy = by2 
-            orang_terdeteksi.append((cx, cy))
-            
-            # Gambar kotak ungu di sekitar orang
-            cv2.rectangle(frame, (bx1, by1), (bx2, by2), (255, 0, 255), 2)
-            cv2.circle(frame, (cx, cy), 5, (255, 0, 255), -1)
+        # 5. Kembalikan gambar yang sudah dicoret-coret ke layar
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-    # --- 5. LOGIKA STATUS MEJA ---
-    status = "KOSONG"
-    warna_kotak = (0, 255, 0) # Hijau
-    
-    # Cek apakah ada orang di dalam kotak meja yg kita buat di sidebar
-    for orang in orang_terdeteksi:
-        ox, oy = orang
-        if meja_x1 < ox < meja_x2 and meja_y1 < oy < meja_y2:
-            status = "TERISI"
-            warna_kotak = (0, 0, 255) # Merah
-            break
-            
-    # Gambar Kotak Meja
-    cv2.rectangle(frame, (meja_x1, meja_y1), (meja_x2, meja_y2), warna_kotak, 3)
-    cv2.putText(frame, f"Meja: {status}", (meja_x1, meja_y1 - 10), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, warna_kotak, 2)
+# --- 4. TAMPILAN SIDEBAR ---
+st.sidebar.header("🛠️ Setting Area")
+x_pos = st.sidebar.slider("Posisi X (Kiri-Kanan)", 0, 640, 100)
+y_pos = st.sidebar.slider("Posisi Y (Atas-Bawah)", 0, 480, 200)
+lebar = st.sidebar.slider("Lebar", 50, 400, 200)
+tinggi = st.sidebar.slider("Tinggi", 50, 400, 200)
 
-    # --- 6. TAMPILKAN HASIL ---
-    # Ubah warna BGR (OpenCV) ke RGB (Streamlit) agar warnanya benar
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    
-    st.image(frame_rgb, caption="Hasil Analisis AI", use_column_width=True)
-    
-    if status == "KOSONG":
-        st.success("✅ Meja Kosong! Silakan duduk.")
-    else:
-        st.error("❌ Meja Terisi! Cari tempat lain.")
+# --- 5. MENJALANKAN STREAMING ---
+st.write("Klik **START** di bawah untuk memulai kamera.")
 
-else:
-    st.warning("Silakan izinkan akses kamera dan klik 'Take Photo'")
+# Menjalankan WebRTC
+ctx = webrtc_streamer(
+    key="example", 
+    video_processor_factory=VideoProcessor,
+    media_stream_constraints={"video": True, "audio": False},
+    rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+)
+
+# --- 6. UPDATE POSISI MEJA REALTIME ---
+# Kode ini mengirim nilai slider ke dalam proses video yang sedang berjalan
+if ctx.video_transformer:
+    ctx.video_transformer.meja_coords = (x_pos, y_pos, x_pos + lebar, y_pos + tinggi)

@@ -1,3 +1,8 @@
 freeglut3-dev
 libgtk2.0-dev
 libgl1-mesa-glx
+libavdevice-dev
+libavfilter-dev
+libopus-dev
+libvpx-dev
+pkg-config
