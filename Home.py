@@ -1,23 +1,88 @@
 import streamlit as st
-import sys
-st.divider()
-st.caption(f"Versi Python Server: {sys.version}")
+import cv2
+import av
+import numpy as np
+from ultralytics import YOLO
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
-st.set_page_config(
-    page_title="Sistem Resto AI",
-    page_icon="🤖",
-)
+st.set_page_config(page_title="CCTV Smart Resto", layout="wide")
 
-st.title("👋 Selamat Datang di Smart Resto AI")
+# --- LOAD MODEL ---
+@st.cache_resource
+def load_model():
+    return YOLO("yolov8n.pt")
 
-st.markdown(
-    """
-    Aplikasi ini menggunakan Kecerdasan Buatan (AI) untuk memantau restoran secara otomatis.
+try:
+    model = load_model()
+except Exception as e:
+    st.error(f"Error loading model: {e}")
+
+# --- PROCESSOR CLASS ---
+class VideoProcessor(VideoTransformerBase):
+    def __init__(self):
+        self.meja_coords = (100, 200, 300, 400)
+        self.model = model
+
+    def recv(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        
+        # Deteksi AI
+        results = self.model.predict(img, classes=0, conf=0.5, verbose=False)
+        orang_terdeteksi = []
+        for result in results:
+            boxes = result.boxes
+            for box in boxes:
+                bx1, by1, bx2, by2 = map(int, box.xyxy[0])
+                cx, cy = (bx1 + bx2) // 2, by2
+                orang_terdeteksi.append((cx, cy))
+                cv2.rectangle(img, (bx1, by1), (bx2, by2), (255, 0, 255), 2)
+
+        # Logika Status Meja
+        mx1, my1, mx2, my2 = self.meja_coords
+        status = "KOSONG"
+        warna = (0, 255, 0) # Hijau
+        
+        for orang in orang_terdeteksi:
+            if mx1 < orang[0] < mx2 and my1 < orang[1] < my2:
+                status = "TERISI"
+                warna = (0, 0, 255) # Merah
+                break
+        
+        # Gambar Kotak Meja
+        cv2.rectangle(img, (mx1, my1), (mx2, my2), warna, 3)
+        cv2.putText(img, f"Status: {status}", (mx1, my1-10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, warna, 2)
+        
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+# --- TAMPILAN UTAMA ---
+st.title("📹 CCTV Smart Resto (Pusat)")
+st.caption("Monitoring Real-time dengan AI")
+
+col1, col2 = st.columns([3, 1])
+
+with col1:
+    # MENJALANKAN WEBRTC DENGAN SERVER STUN (ANTI-BLOKIR)
+    ctx = webrtc_streamer(
+        key="home-cctv", 
+        video_processor_factory=VideoProcessor,
+        media_stream_constraints={"video": True, "audio": False},
+        rtc_configuration={
+            "iceServers": [
+                {"urls": ["stun:stun.l.google.com:19302"]},
+                {"urls": ["stun:stun1.l.google.com:19302"]},
+                {"urls": ["stun:stun2.l.google.com:19302"]},
+                {"urls": ["stun:stun.services.mozilla.com"]},
+            ]
+        }
+    )
+
+with col2:
+    st.write("### ⚙️ Setting Area")
+    x = st.slider("Posisi X", 0, 640, 100)
+    y = st.slider("Posisi Y", 0, 480, 200)
+    w = st.slider("Lebar", 50, 400, 200)
+    h = st.slider("Tinggi", 50, 400, 200)
     
-    **Silakan pilih menu di sebelah kiri:**
-    * **📹 CCTV Monitor:** Untuk layar monitor di kasir/ruang staff (Real-time Deteksi).
-    * **📊 Owner Dashboard:** Untuk pemilik melihat statistik & kinerja pegawai.
-    """
-)
-
-st.info("👈 Pilih menu di Sidebar untuk memulai.")
+    if ctx.video_transformer:
+        ctx.video_transformer.meja_coords = (x, y, x+w, y+h)
