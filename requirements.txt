@@ -3,7 +3,8 @@ opencv-python-headless
 ultralytics
 numpy
 Pillow
-streamlit-webrtc
+streamlit-webrtc>=0.47.0
+aiortc>=1.8.0
 av
 pandas
 altair
