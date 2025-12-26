@@ -63,18 +63,21 @@ col1, col2 = st.columns([3, 1])
 
 with col1:
     # MENJALANKAN WEBRTC DENGAN SERVER STUN (ANTI-BLOKIR)
-    ctx = webrtc_streamer(
+   ctx = webrtc_streamer(
         key="home-cctv", 
         video_processor_factory=VideoProcessor,
-        media_stream_constraints={"video": True, "audio": False},
+        # Kita paksa resolusi kecil (360p) dan 15 FPS biar server tidak crash
+        media_stream_constraints={
+            "video": {"width": {"min": 320, "ideal": 480}, "height": {"min": 240, "ideal": 360}, "frameRate": 15},
+            "audio": False
+        },
         rtc_configuration={
             "iceServers": [
                 {"urls": ["stun:stun.l.google.com:19302"]},
                 {"urls": ["stun:stun1.l.google.com:19302"]},
-                {"urls": ["stun:stun2.l.google.com:19302"]},
-                {"urls": ["stun:stun.services.mozilla.com"]},
             ]
-        }
+        },
+        async_processing=True
     )
 
 with col2:
