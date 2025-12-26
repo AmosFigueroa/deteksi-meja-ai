@@ -59,10 +59,7 @@ st.title("📹 CCTV Live Monitor")
 col1, col2 = st.columns([3, 1])
 
 with col1:
-    ctx = webrtc_streamer(
-        key="cctv", 
-        video_processor_factory=VideoProcessor,
-        media_stream_constraints={"video": True, "audio": False},
+    # Menjalankan WebRTC dengan Server STUN (Anti-Blokir)
     ctx = webrtc_streamer(
         key="cctv", 
         video_processor_factory=VideoProcessor,
