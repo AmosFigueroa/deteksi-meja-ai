@@ -44,5 +44,5 @@ if pwd == "admin123":
     st.dataframe(pegawai, use_container_width=True)
 
 else:
-    if pwd != "":
+    if pwd != "admin123":
         st.error("Password Salah!")
